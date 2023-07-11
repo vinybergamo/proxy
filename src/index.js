@@ -96,60 +96,44 @@ app.post("/gateway", async (req, res) => {
   return res.status(201).json({ message: "Api saved", api: result });
 });
 
-app.all("/api", (req, res) =>
-  res.status(400).json({ error: "Error connect to api" })
-);
+app.all("/:name*", async (req, res) => {
+  const { name } = req.params;
 
-const server = http.createServer(async (req, res) => {
-  if (req.url.startsWith("/api")) {
-    const name = req.url.split("/")[2];
-    req.url = req.url.replace("/api/" + name, "");
+  const api = await prisma.api.findUnique({
+    where: {
+      name,
+    },
+  });
 
-    const api = await prisma.api.findUnique({
-      where: {
-        name,
-      },
+  if (!api)
+    return res.status(404).json({
+      reason: `Api ${name} not found`,
     });
 
-    if (!api) {
-      res.writeHead(500);
-      res.end(
-        JSON.stringify(
-          {
-            reason: `Api ${name} not found`,
-          },
-          null,
-          3
-        )
-      );
+  proxy.on("proxyReq", err => {
+    console.log(err.path);
+  });
 
-      return;
-    }
+  const path = req.params[0];
 
-    proxy.on("error", err => {
-      res.writeHead(500);
-      res.end(
-        JSON.stringify(
-          {
-            reason: "Internal server error",
-          },
-          null,
-          3
-        )
-      );
-
-      return;
+  proxy.on("error", err => {
+    return res.status(500).json({
+      reason: "Internal server error",
     });
+  });
 
-    proxy.web(req, res, {
-      target: api.url,
+  return proxy.web(
+    req,
+    res,
+    {
+      target: api.url + path,
       secure: false,
-    });
-  } else {
-    app(req, res);
-  }
+      ignorePath: true,
+    },
+    e => console.log(e)
+  );
 });
 
-server.listen(8000, () => {
+app.listen(8000, () => {
   console.log("Server runing on 8000");
 });
